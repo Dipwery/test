@@ -1,75 +1,120 @@
-// আপনার Agora App ID এখানে বসান
-const APP_ID = "b745c3bbd91b475b873956413e2ae40e"; 
-const CHANNEL = "poorbank_main_room"; // চ্যানেলের নাম সবার জন্য এক হতে হবে
-const TOKEN = '007eJxTYJCZzbHBV/H27eDt8bNVz0zcfm+mqd45IevwKz5Zk7fPfqinwJBkbmKabJyUlGJpmGRibppkYW5saWpmYmicapSYamKQGiXgm9kQyMiwqtyVlZEBAkF8IYaC/PyipMS87PjcxMy8+KL8/FwGBgABcyQu'; // টেস্টিং মোডে থাকলে এটি null রাখা যায়
+const SUPABASE_URL = "https://dnelzlyuhhxloysstnlg.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRuZWx6bHl1aGh4bG95c3N0bmxnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU4NTM4MjAsImV4cCI6MjA4MTQyOTgyMH0.jYdJM1FTJja_A5CdTN3C3FWlKd_0E1JgHyaM4767SLc";
+const AGORA_APP_ID = "b745c3bbd91b475b873956413e2ae40e"; 
+const CHANNEL_NAME = "poorbank_call_room";
 
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 let client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
 let localTracks = { videoTrack: null, audioTrack: null };
-let remoteUsers = {};
 
-// --- ১. কল শুরু করা ---
-async function startCall() {
-    try {
-        // Agora চ্যানেলে জয়েন করা
-        await client.join(APP_ID, CHANNEL, TOKEN, null);
+// --- অথেন্টিকেশন ---
+async function handleAuth(mode) {
+    const email = document.getElementById('authEmail').value.trim();
+    const name = document.getElementById('authName').value.trim();
 
-        // অডিও এবং ভিডিও ক্যামেরা অন করা
-        localTracks.audioTrack = await AgoraRTC.createMicrophoneAudioTrack();
-        localTracks.videoTrack = await AgoraRTC.createCameraVideoTrack();
+    if (!email) return alert("ইমেইল দিন!");
 
-        // নিজের ভিডিও প্লে করা
-        localTracks.videoTrack.play("local-player");
-
-        // সার্ভারে পাবলিশ করা যাতে অন্যরা দেখতে পায়
-        await client.publish([localTracks.audioTrack, localTracks.videoTrack]);
-
-        document.getElementById('join-btn').style.display = 'none';
-        document.getElementById('leave-btn').style.display = 'inline-block';
-        
-        alert("কল শুরু হয়েছে!");
-    } catch (error) {
-        console.error("Error joining call:", error);
-        alert("ক্যামেরা বা মাইক্রোফোন পারমিশন দিন!");
+    if (mode === 'signup') {
+        const { error } = await supabaseClient.from('user_accounts').insert([{ email, name, balance: 1000 }]);
+        if (error) return alert("সাইনআপ ব্যর্থ! ইমেইলটি আগেই ব্যবহৃত।");
+        alert("অ্যাকাউন্ট তৈরি! এখন লগইন করুন।");
+    } else {
+        const { data } = await supabaseClient.from('user_accounts').select('*').eq('email', email).maybeSingle();
+        if (data) {
+            localStorage.setItem("userSession", data.email + " : " + data.name);
+            showDashboard();
+        } else alert("অ্যাকাউন্ট পাওয়া যায়নি!");
     }
 }
 
-// --- ২. অন্য ইউজার জয়েন করলে তা ধরা ---
+function showDashboard() {
+    document.getElementById('auth-section').style.display = 'none';
+    document.getElementById('dashboard-section').style.display = 'block';
+    loadUserData();
+    fetchUserList();
+    listenForCalls();
+}
+
+async function loadUserData() {
+    const myEmail = localStorage.getItem("userSession").split(" : ")[0];
+    const { data } = await supabaseClient.from('user_accounts').select('*').eq('email', myEmail).maybeSingle();
+    if (data) {
+        document.getElementById('userBalance').innerText = "৳ " + data.balance;
+        document.getElementById('userNameDisplay').innerText = data.name;
+    }
+}
+
+// --- ইউজার লিস্ট এবং কলিং ---
+async function fetchUserList() {
+    const myEmail = localStorage.getItem("userSession").split(" : ")[0];
+    const { data } = await supabaseClient.from('user_accounts').select('name, email');
+    const listContainer = document.getElementById('user-list-container');
+    listContainer.innerHTML = "";
+
+    data.forEach(user => {
+        if (user.email !== myEmail) {
+            const div = document.createElement('div');
+            div.className = "user-item";
+            div.innerHTML = `
+                <span><strong>${user.name || 'User'}</strong></span>
+                <div>
+                    <button class="btn-green" onclick="makeCall('${user.email}', 'video')">🎥</button>
+                    <button class="btn-blue" onclick="makeCall('${user.email}', 'audio')">📞</button>
+                </div>`;
+            listContainer.appendChild(div);
+        }
+    });
+}
+
+function listenForCalls() {
+    const myEmail = localStorage.getItem("userSession").split(" : ")[0];
+    supabaseClient.channel('calls').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'calls' }, payload => {
+        if (payload.new.receiver_email === myEmail) {
+            if (confirm(`${payload.new.caller_email} কল দিচ্ছে। রিসিভ করবেন?`)) joinCall(payload.new.call_type);
+        }
+    }).subscribe();
+}
+
+async function makeCall(email, type) {
+    const myEmail = localStorage.getItem("userSession").split(" : ")[0];
+    await supabaseClient.from('calls').insert([{ caller_email: myEmail, receiver_email: email, call_type: type }]);
+    joinCall(type);
+}
+
+// --- অ্যাগোরা কল সিস্টেম ---
+async function joinCall(type) {
+    try {
+        document.getElementById('ui-container').style.display = 'none'; // প্রাইভেসি: ড্যাশবোর্ড হাইড
+        await client.join(AGORA_APP_ID, CHANNEL_NAME, null, null);
+
+        if (type === 'video') {
+            [localTracks.audioTrack, localTracks.videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
+            localTracks.videoTrack.play("local-player");
+            await client.publish([localTracks.audioTrack, localTracks.videoTrack]);
+        } else {
+            localTracks.audioTrack = await AgoraRTC.createMicrophoneAudioTrack();
+            await client.publish([localTracks.audioTrack]);
+            document.getElementById('local-player').innerHTML = "<div style='color:white; font-size:10px; padding:20px;'>Talking...</div>";
+        }
+        document.getElementById('leave-btn').style.display = 'block';
+    } catch (err) { leaveCall(); }
+}
+
 client.on("user-published", async (user, mediaType) => {
     await client.subscribe(user, mediaType);
-    console.log("Remote user connected!");
-
-    if (mediaType === "video") {
-        // অন্য ইউজারের ভিডিও প্লে করা
-        user.videoTrack.play("remote-player");
-    }
-    if (mediaType === "audio") {
-        user.audioTrack.play();
-    }
+    if (mediaType === "video") user.videoTrack.play("remote-player");
+    if (mediaType === "audio") user.audioTrack.play();
 });
 
-// যখন অন্য ইউজার কল কেটে দিবে
-client.on("user-left", (user) => {
-    console.log("Remote user left the call.");
-    // রিমোট প্লেয়ার খালি করা
-    document.getElementById("remote-player").innerHTML = '<span style="color:white; position:absolute; bottom:5px; left:5px; z-index:10;">User Disconnected</span>';
-});
-
-// --- ৩. কল শেষ করা ---
 async function leaveCall() {
-    for (let trackName in localTracks) {
-        let track = localTracks[trackName];
-        if (track) {
-            track.stop();
-            track.close();
-            localTracks[trackName] = null;
-        }
-    }
-
+    for (let track in localTracks) if (localTracks[track]) { localTracks[track].stop(); localTracks[track].close(); }
     await client.leave();
-    
-    document.getElementById('join-btn').style.display = 'inline-block';
-    document.getElementById('leave-btn').style.display = 'none';
-    document.getElementById('local-player').innerHTML = '<span style="color:white; position:absolute; bottom:5px; left:5px; z-index:10;">You</span>';
-    
-    alert("কল শেষ হয়েছে।");
+    location.reload();
 }
+
+function logout() { localStorage.clear(); location.reload(); }
+
+window.onload = () => { 
+    if (localStorage.getItem("userSession")) showDashboard(); 
+    else document.getElementById('auth-section').style.display = 'block'; 
+};
