@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PoorBank Call System</title>
+    <script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.11.0.js"></script>
+    <style>
+        #video-container { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: 20px; }
+        .video-box { width: 320px; height: 240px; background: #000; border-radius: 10px; overflow: hidden; position: relative; }
+        .controls { margin-top: 15px; }
+        button { padding: 10px 20px; cursor: pointer; border-radius: 5px; border: none; font-weight: bold; }
+        #join-btn { background-color: #28a745; color: white; }
+        #leave-btn { background-color: #dc3545; color: white; display: none; }
+    </style>
+</head>
+<body>
+
+    <div id="video-container">
+        <h3>PoorBank Live Call</h3>
+        
+        <div id="local-player" class="video-box">
+            <span style="color:white; position:absolute; bottom:5px; left:5px; z-index:10;">You</span>
+        </div>
+
+        <div id="remote-player" class="video-box">
+            <span style="color:white; position:absolute; bottom:5px; left:5px; z-index:10;">Remote User</span>
+        </div>
+
+        <div class="controls">
+            <button id="join-btn" onclick="startCall()">Call Join / Start</button>
+            <button id="leave-btn" onclick="leaveCall()">End Call</button>
+        </div>
+    </div>
+
+    <script src="call.js"></script>
+</body>
+</html>
